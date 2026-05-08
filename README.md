@@ -33,7 +33,7 @@
 ### 🛠️ 安装
 
 ```bash linenums="1"
-pip install rapidocr_api
+uv sync
 ```
 
 ### 模型下载
@@ -46,8 +46,7 @@ pip install rapidocr_api
 
 ```bash
 # 默认参数启动
-rapidocr_api
-
+uv run rapidocr_api/main.py
 # 指定参数：端口与进程数量；
 rapidocr_api -ip 0.0.0.0 -p 9005 -workers 2
 ```

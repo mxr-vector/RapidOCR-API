@@ -1,6 +1,6 @@
 # -*- encoding: utf-8 -*-
-# @Author: SWHL
-# @Contact: liekkaskono@163.com
+# @Author: YuanJie
+# @Contact: wangjh2001@qq.com
 import argparse
 import logging
 import sys
