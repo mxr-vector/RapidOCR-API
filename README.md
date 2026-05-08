@@ -36,6 +36,10 @@
 pip install rapidocr_api
 ```
 
+### 模型下载
+
+[rapidocr-models](https://modelscope.ai/models/RapidAI/RapidOCR/files) 下载的模型文件放入 models目录下
+
 ### 🚀 使用
 
 #### ▶️ 启动服务
