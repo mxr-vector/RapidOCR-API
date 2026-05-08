@@ -9,7 +9,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path as FilePath
-from typing import Annotated, Any, Dict, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 from uuid import uuid4
 
 sys.path.append(str(FilePath(__file__).resolve().parent.parent))
@@ -28,11 +28,16 @@ from rapidocr_api.utils import (
     PDF_REQUEST_TIMEOUT_SECONDS,
     build_ocr_kwargs,
     decode_base64_payload,
-    is_pdf_input,
+    get_pdf_storage_record,
+    is_pdf_upload_file,
     load_image,
     open_pdf,
+    read_pdf_result,
     read_upload_file,
     render_pdf_pages,
+    store_pdf_upload,
+    update_pdf_storage_record,
+    write_pdf_result,
 )
 
 # Starlette 会先按单个 multipart part 限制读取表单字段，再按文件限制读取上传内容。
@@ -47,6 +52,25 @@ class OcrResult(BaseModel):
     rec_txt_all: str = ""
 
 
+class PdfPageResult(BaseModel):
+    page_no: int
+    rec_txt_all: str = ""
+    result: OcrResult
+
+
+class PdfResult(BaseModel):
+    page_count: int
+    rec_txt_all: str = ""
+    pages: list[PdfPageResult]
+
+
+class PdfRenderStat(BaseModel):
+    page_no: int
+    dpi: int
+    width: int
+    height: int
+
+
 class PdfTaskCreated(BaseModel):
     task_id: str
     status: Literal["pending"]
@@ -57,13 +81,40 @@ class PdfTaskError(BaseModel):
     detail: Any
 
 
+class PdfStoredFile(BaseModel):
+    uuid: str
+    knowledge: str
+    original_filename: str
+    filename: str
+    stored_pdf_filename: str
+    result_filename: str
+    original_file_path: str
+    result_file_path: str
+    file_size: int
+    created_at: str
+
+
+class PdfStorageRecord(PdfStoredFile):
+    task_id: str
+    status: Literal["pending", "running", "succeeded", "failed"]
+    started_at: str | None = None
+    finished_at: str | None = None
+    error: PdfTaskError | None = None
+
+    @property
+    def file(self) -> PdfStoredFile:
+        return PdfStoredFile.model_validate(self.model_dump())
+
+
 class PdfTask(BaseModel):
     task_id: str
     status: Literal["pending", "running", "succeeded", "failed"]
     created_at: str
     started_at: str | None = None
     finished_at: str | None = None
-    result: Dict[str, Any] | None = None
+    file: PdfStoredFile | None = None
+    result_file_path: str | None = None
+    result: PdfResult | None = None
     error: PdfTaskError | None = None
 
 
@@ -74,6 +125,8 @@ class RootResponse(BaseModel):
 ImageFileForm = Annotated[UploadFile | None, File(description="上传图片或 PDF 文件")]
 PdfFileForm = Annotated[UploadFile, File(description="上传 PDF 文件")]
 ImageDataForm = Annotated[str | None, Form(description="图片 base64 字符串，支持 data URI")]
+PdfKnowledgeForm = Annotated[str, Form(description="知识库标识，用于 PDF 存储目录")]
+OptionalKnowledgeForm = Annotated[str | None, Form(description="知识库标识，用于 PDF 存储目录")]
 UseDetForm = Annotated[bool | None, Form(description="是否启用文本检测")]
 UseClsForm = Annotated[bool | None, Form(description="是否启用方向分类")]
 UseRecForm = Annotated[bool | None, Form(description="是否启用文本识别")]
@@ -88,9 +141,6 @@ TaskIdPath = Annotated[str, Path(description="PDF OCR 任务 ID")]
 logger = logging.getLogger(__name__)
 pdf_request_semaphore = threading.BoundedSemaphore(PDF_MAX_CONCURRENT_REQUESTS)
 pdf_task_executor = ThreadPoolExecutor(max_workers=PDF_MAX_CONCURRENT_REQUESTS)
-pdf_tasks_lock = threading.Lock()
-# 任务结果保存在当前进程内存中；多 worker 部署时，每个 worker 只知道自己创建的任务。
-pdf_tasks: Dict[str, Dict[str, Any]] = {}
 
 
 # PDF OCR 通常耗时明显长于图片 OCR，因此接口只负责创建任务并立即返回 task_id。
@@ -120,7 +170,7 @@ class OCRAPIUtils:
         use_cls: Optional[bool] = None,
         use_rec: Optional[bool] = None,
         **kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> OcrResult:
         img = np.array(ImageOps.exif_transpose(ori_img).convert("RGB"))
         try:
             ocr_res = self.ocr(
@@ -130,18 +180,18 @@ class OCRAPIUtils:
             del img
 
         if ocr_res.boxes is None or ocr_res.txts is None or ocr_res.scores is None:
-            return {}
+            return OcrResult()
 
-        out_dict: Dict[str, Any] = {"rec_txt_all": " ".join(ocr_res.txts)}
+        result_data: dict[str, Any] = {"rec_txt_all": " ".join(ocr_res.txts)}
         for i, (boxes, txt, score) in enumerate(
             zip(ocr_res.boxes, ocr_res.txts, ocr_res.scores)
         ):
-            out_dict[str(i)] = {
+            result_data[str(i)] = {
                 "rec_txt": txt,
                 "dt_boxes": boxes.tolist(),
                 "score": float(score),
             }
-        return out_dict
+        return OcrResult.model_validate(result_data)
 
 
 app = FastAPI(title="RapidOCR API", version="0.1.0")
@@ -153,54 +203,77 @@ def root() -> RootResponse:
     return RootResponse(message="Welcome to RapidOCR API Server!")
 
 
+def _task_from_record(record: PdfStorageRecord, include_result: bool = False) -> PdfTask:
+    result = None
+    if include_result and record.status == "succeeded":
+        result = PdfResult.model_validate(read_pdf_result(record.result_file_path))
+    return PdfTask(
+        task_id=record.task_id,
+        status=record.status,
+        created_at=record.created_at,
+        started_at=record.started_at,
+        finished_at=record.finished_at,
+        file=record.file,
+        result_file_path=record.result_file_path,
+        result=result,
+        error=record.error,
+    )
+
+
+def _load_pdf_storage_record(task_id: str) -> PdfStorageRecord | None:
+    record = get_pdf_storage_record(task_id)
+    if record is None:
+        return None
+    return PdfStorageRecord.model_validate(record)
+
+
 def _create_pdf_task(
-    pdf_data: bytes,
+    upload_file: UploadFile,
+    knowledge: str,
     use_det: Optional[bool],
     use_cls: Optional[bool],
     use_rec: Optional[bool],
-    ocr_kwargs: Dict[str, Any],
-) -> Dict[str, str]:
+    ocr_kwargs: dict[str, Any],
+) -> PdfTaskCreated:
     task_id = uuid4().hex
-    task = {
-        "task_id": task_id,
-        "status": "pending",
-        "created_at": _utc_now_iso(),
-        "started_at": None,
-        "finished_at": None,
-        "result": None,
-        "error": None,
-    }
-    with pdf_tasks_lock:
-        pdf_tasks[task_id] = task
+    record = PdfStorageRecord.model_validate(store_pdf_upload(upload_file, task_id, knowledge))
 
     pdf_task_executor.submit(
-        _run_pdf_task, task_id, pdf_data, use_det, use_cls, use_rec, ocr_kwargs
+        _run_pdf_task,
+        task_id,
+        record.original_file_path,
+        record.result_file_path,
+        use_det,
+        use_cls,
+        use_rec,
+        ocr_kwargs,
     )
-    return {"task_id": task_id, "status": "pending"}
+    return PdfTaskCreated(task_id=task_id, status="pending")
 
 
 @app.post("/ocr/pdf", status_code=202, response_model=PdfTaskCreated)
 def create_pdf_ocr_task(
     pdf_file: PdfFileForm,
+    knowledge: PdfKnowledgeForm,
     use_det: UseDetForm = None,
     use_cls: UseClsForm = None,
     use_rec: UseRecForm = None,
     text_score: TextScoreForm = None,
     return_word_box: ReturnWordBoxForm = None,
     return_single_char_box: ReturnSingleCharBoxForm = None,
-) -> Dict[str, str]:
-    pdf_data, _ = read_upload_file(pdf_file)
+) -> PdfTaskCreated:
+    if not is_pdf_upload_file(pdf_file):
+        raise HTTPException(status_code=400, detail="Input is not a supported PDF.")
     ocr_kwargs = build_ocr_kwargs(text_score, return_word_box, return_single_char_box)
-    return _create_pdf_task(pdf_data, use_det, use_cls, use_rec, ocr_kwargs)
+    return _create_pdf_task(pdf_file, knowledge, use_det, use_cls, use_rec, ocr_kwargs)
 
 
 @app.get("/ocr/pdf/tasks/{task_id}", response_model=PdfTask)
-def get_pdf_ocr_task(task_id: TaskIdPath) -> Dict[str, Any]:
-    with pdf_tasks_lock:
-        task = pdf_tasks.get(task_id)
-        if task is None:
-            raise HTTPException(status_code=404, detail="PDF OCR task not found.")
-        return dict(task)
+def get_pdf_ocr_task(task_id: TaskIdPath) -> PdfTask:
+    record = _load_pdf_storage_record(task_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="PDF OCR task not found.")
+    return _task_from_record(record, include_result=True)
 
 
 @app.post("/ocr", response_model=OcrResult | PdfTaskCreated)
@@ -208,13 +281,14 @@ def ocr(
     response: Response,
     image_file: ImageFileForm = None,
     image_data: ImageDataForm = None,
+    knowledge: OptionalKnowledgeForm = None,
     use_det: UseDetForm = None,
     use_cls: UseClsForm = None,
     use_rec: UseRecForm = None,
     text_score: TextScoreForm = None,
     return_word_box: ReturnWordBoxForm = None,
     return_single_char_box: ReturnSingleCharBoxForm = None,
-) -> Dict[str, Any] | Dict[str, str]:
+) -> OcrResult | PdfTaskCreated:
     # 统一入口只允许一种输入来源，避免同一次请求产生不确定的识别对象。
     if image_file and image_data:
         raise HTTPException(
@@ -223,11 +297,12 @@ def ocr(
 
     ocr_kwargs = build_ocr_kwargs(text_score, return_word_box, return_single_char_box)
     if image_file:
-        data, source_name = read_upload_file(image_file)
-        # PDF 是长任务，即使从统一 /ocr 入口上传也改为返回 task_id，避免同一类文件出现两种响应语义。
-        if is_pdf_input(data, source_name):
+        if is_pdf_upload_file(image_file):
+            if knowledge is None or not knowledge.strip():
+                raise HTTPException(status_code=400, detail="knowledge is required for PDF uploads.")
             response.status_code = 202
-            return _create_pdf_task(data, use_det, use_cls, use_rec, ocr_kwargs)
+            return _create_pdf_task(image_file, knowledge, use_det, use_cls, use_rec, ocr_kwargs)
+        data, _ = read_upload_file(image_file)
         return process_image_bytes(data, use_det, use_cls, use_rec, ocr_kwargs)
 
     if image_data:
@@ -257,26 +332,24 @@ def _check_pdf_timeout(started_at: float, processed_pages: int) -> None:
         raise HTTPException(status_code=503, detail="PDF OCR processing timed out.")
 
 
-# 任务状态只在这个函数中成组更新，保证查询接口不会读到半写入的状态。
 def _update_pdf_task(task_id: str, **updates: Any) -> None:
-    with pdf_tasks_lock:
-        task = pdf_tasks.get(task_id)
-        if task is not None:
-            task.update(updates)
+    update_pdf_storage_record(task_id, **updates)
 
 
 # 后台线程不能直接把异常抛给客户端，因此把 HTTPException 转成可轮询的 failed 状态。
 def _run_pdf_task(
     task_id: str,
-    pdf_data: bytes,
+    pdf_path: str,
+    result_path: str,
     use_det: Optional[bool],
     use_cls: Optional[bool],
     use_rec: Optional[bool],
-    ocr_kwargs: Dict[str, Any],
+    ocr_kwargs: dict[str, Any],
 ) -> None:
     _update_pdf_task(task_id, status="running", started_at=_utc_now_iso())
     try:
-        result = process_pdf(pdf_data, use_det, use_cls, use_rec, ocr_kwargs)
+        result = process_pdf(pdf_path, use_det, use_cls, use_rec, ocr_kwargs)
+        write_pdf_result(result_path, result.model_dump())
     except HTTPException as exc:
         _update_pdf_task(
             task_id,
@@ -297,7 +370,8 @@ def _run_pdf_task(
             task_id,
             status="succeeded",
             finished_at=_utc_now_iso(),
-            result=result,
+            result_file_path=result_path,
+            error=None,
         )
 
 
@@ -315,8 +389,8 @@ def process_image_bytes(
     use_det: Optional[bool],
     use_cls: Optional[bool],
     use_rec: Optional[bool],
-    ocr_kwargs: Dict[str, Any],
-) -> Dict[str, Any]:
+    ocr_kwargs: dict[str, Any],
+) -> OcrResult:
     try:
         img = load_image(image_data)
         try:
@@ -331,21 +405,21 @@ def process_image_bytes(
 
 
 def process_pdf(
-    pdf_data: bytes,
+    pdf_path: str,
     use_det: Optional[bool],
     use_cls: Optional[bool],
     use_rec: Optional[bool],
-    ocr_kwargs: Dict[str, Any],
-) -> Dict[str, Any]:
+    ocr_kwargs: dict[str, Any],
+) -> PdfResult:
     _acquire_pdf_slot()
     started_at = time.monotonic()
-    pages = []
-    render_stats = []
+    pages: list[PdfPageResult] = []
+    render_stats: list[PdfRenderStat] = []
     processed_pages = 0
     pdf_page_count = 0
 
     try:
-        with open_pdf(pdf_data) as pdf:
+        with open_pdf(pdf_path) as pdf:
             pdf_page_count = pdf.page_count
             for rendered_page in render_pdf_pages(pdf):
                 _check_pdf_timeout(started_at, processed_pages)
@@ -356,19 +430,19 @@ def process_pdf(
                     )
                     processed_pages += 1
                     pages.append(
-                        {
-                            "page_no": rendered_page.page_no,
-                            "rec_txt_all": result.get("rec_txt_all", ""),
-                            "result": result,
-                        }
+                        PdfPageResult(
+                            page_no=rendered_page.page_no,
+                            rec_txt_all=result.rec_txt_all,
+                            result=result,
+                        )
                     )
                     render_stats.append(
-                        {
-                            "page_no": rendered_page.page_no,
-                            "dpi": rendered_page.dpi,
-                            "width": rendered_page.width,
-                            "height": rendered_page.height,
-                        }
+                        PdfRenderStat(
+                            page_no=rendered_page.page_no,
+                            dpi=rendered_page.dpi,
+                            width=rendered_page.width,
+                            height=rendered_page.height,
+                        )
                     )
                     _check_pdf_timeout(started_at, processed_pages)
                 finally:
@@ -396,11 +470,11 @@ def process_pdf(
         elapsed,
         render_stats,
     )
-    return {
-        "page_count": len(pages),
-        "rec_txt_all": "\n".join(page["rec_txt_all"] for page in pages if page["rec_txt_all"]),
-        "pages": pages,
-    }
+    return PdfResult(
+        page_count=len(pages),
+        rec_txt_all="\n".join(page.rec_txt_all for page in pages if page.rec_txt_all),
+        pages=pages,
+    )
 
 
 def main() -> None:
