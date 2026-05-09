@@ -7,7 +7,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path as FilePath
 from typing import Annotated, Any, Literal, Optional
 from uuid import uuid4
@@ -17,7 +17,7 @@ sys.path.append(str(FilePath(__file__).resolve().parent.parent))
 import numpy as np
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, Path, Response, UploadFile
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from PIL import Image, ImageOps
 from rapidocr import RapidOCR
 from starlette.formparsers import MultiPartParser
@@ -93,12 +93,9 @@ class PdfTaskError(BaseModel):
 
 
 class PdfStoredFile(BaseModel):
-    uuid: str
     knowledge: str
     original_filename: str
     filename: str
-    stored_pdf_filename: str
-    result_filename: str
     original_file_path: str
     result_file_path: str
     file_size: int
@@ -109,9 +106,18 @@ class PdfStorageRecord(PdfStoredFile):
     task_id: str
     status: Literal["pending", "running", "succeeded", "failed"]
     result_type: Literal["ocr", "markdown"] = "ocr"
-    started_at: str | None = None
-    finished_at: str | None = None
+    started_at: float | None = None
+    finished_at: float | None = None
     error: PdfTaskError | None = None
+
+    @field_validator("started_at", "finished_at", mode="before")
+    @classmethod
+    def parse_timestamp(cls, value: Any) -> float | None:
+        if value is None or isinstance(value, (int, float)):
+            return value
+        if isinstance(value, str):
+            return datetime.fromisoformat(value).timestamp()
+        return value
 
     @property
     def file(self) -> PdfStoredFile:
@@ -122,8 +128,8 @@ class PdfTask(BaseModel):
     task_id: str
     status: Literal["pending", "running", "succeeded", "failed"]
     created_at: str
-    started_at: str | None = None
-    finished_at: str | None = None
+    started_at: float | None = None
+    finished_at: float | None = None
     file: PdfStoredFile | None = None
     result_file_path: str | None = None
     result: PdfResult | None = None
@@ -134,8 +140,8 @@ class PdfMarkdownTask(BaseModel):
     task_id: str
     status: Literal["pending", "running", "succeeded", "failed"]
     created_at: str
-    started_at: str | None = None
-    finished_at: str | None = None
+    started_at: float | None = None
+    finished_at: float | None = None
     file: PdfStoredFile | None = None
     result_file_path: str | None = None
     result: PdfMarkdownResult | None = None
@@ -169,8 +175,8 @@ pdf_task_executor = ThreadPoolExecutor(max_workers=PDF_MAX_CONCURRENT_REQUESTS)
 
 # PDF OCR 通常耗时明显长于图片 OCR，因此接口只负责创建任务并立即返回 task_id。
 # 实际渲染和识别在受限线程池中执行，避免 HTTP 连接长时间占用并防止并发 PDF 请求拖垮服务。
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+def _now_timestamp() -> float:
+    return time.time()
 
 
 class OCRAPIUtils:
@@ -493,7 +499,7 @@ def _run_pdf_task(
     use_rec: Optional[bool],
     ocr_kwargs: dict[str, Any],
 ) -> None:
-    _update_pdf_task(task_id, status="running", started_at=_utc_now_iso())
+    _update_pdf_task(task_id, status="running", started_at=_now_timestamp())
     try:
         result = process_pdf(pdf_path, use_det, use_cls, use_rec, ocr_kwargs)
         write_pdf_result(result_path, result.model_dump())
@@ -501,7 +507,7 @@ def _run_pdf_task(
         _update_pdf_task(
             task_id,
             status="failed",
-            finished_at=_utc_now_iso(),
+            finished_at=_now_timestamp(),
             error={"status_code": exc.status_code, "detail": exc.detail},
         )
     except Exception:
@@ -509,14 +515,14 @@ def _run_pdf_task(
         _update_pdf_task(
             task_id,
             status="failed",
-            finished_at=_utc_now_iso(),
+            finished_at=_now_timestamp(),
             error={"status_code": 500, "detail": "OCR processing failed."},
         )
     else:
         _update_pdf_task(
             task_id,
             status="succeeded",
-            finished_at=_utc_now_iso(),
+            finished_at=_now_timestamp(),
             result_file_path=result_path,
             error=None,
         )
@@ -531,7 +537,7 @@ def _run_pdf_markdown_task(
     use_rec: Optional[bool],
     ocr_kwargs: dict[str, Any],
 ) -> None:
-    _update_pdf_task(task_id, status="running", started_at=_utc_now_iso())
+    _update_pdf_task(task_id, status="running", started_at=_now_timestamp())
     try:
         result = process_pdf_markdown(pdf_path, use_det, use_cls, use_rec, ocr_kwargs)
         write_pdf_result(result_path, result.model_dump())
@@ -539,7 +545,7 @@ def _run_pdf_markdown_task(
         _update_pdf_task(
             task_id,
             status="failed",
-            finished_at=_utc_now_iso(),
+            finished_at=_now_timestamp(),
             error={"status_code": exc.status_code, "detail": exc.detail},
         )
     except Exception:
@@ -547,14 +553,14 @@ def _run_pdf_markdown_task(
         _update_pdf_task(
             task_id,
             status="failed",
-            finished_at=_utc_now_iso(),
+            finished_at=_now_timestamp(),
             error={"status_code": 500, "detail": "OCR processing failed."},
         )
     else:
         _update_pdf_task(
             task_id,
             status="succeeded",
-            finished_at=_utc_now_iso(),
+            finished_at=_now_timestamp(),
             result_file_path=result_path,
             error=None,
         )

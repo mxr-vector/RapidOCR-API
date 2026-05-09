@@ -114,18 +114,13 @@ def build_pdf_storage_record(upload_filename: str, file_uuid: str, knowledge: st
     if storage_root != resolved_day_dir and storage_root not in resolved_day_dir.parents:
         raise HTTPException(status_code=400, detail="knowledge is invalid.")
     original_filename = Path(upload_filename).name
-    pdf_filename = f"{file_uuid}.pdf"
-    result_filename = f"{file_uuid}.json"
     return {
         "task_id": file_uuid,
-        "uuid": file_uuid,
         "knowledge": safe_knowledge,
         "original_filename": original_filename,
         "filename": original_filename,
-        "stored_pdf_filename": pdf_filename,
-        "result_filename": result_filename,
-        "original_file_path": (day_dir / pdf_filename).as_posix(),
-        "result_file_path": (day_dir / result_filename).as_posix(),
+        "original_file_path": (day_dir / f"{file_uuid}.pdf").as_posix(),
+        "result_file_path": (day_dir / f"{file_uuid}.json").as_posix(),
         "file_size": 0,
         "status": "pending",
         "created_at": now.isoformat(),
@@ -177,7 +172,7 @@ def append_pdf_storage_index(record: Dict[str, Any]) -> None:
 def get_pdf_storage_record(task_id: str) -> Dict[str, Any] | None:
     with pdf_storage_index_lock:
         for record in _read_pdf_storage_index_unlocked():
-            if record.get("task_id") == task_id or record.get("uuid") == task_id:
+            if record.get("task_id") == task_id:
                 return dict(record)
     return None
 
@@ -186,7 +181,7 @@ def update_pdf_storage_record(task_id: str, **updates: Any) -> Dict[str, Any] | 
     with pdf_storage_index_lock:
         index_data = _read_pdf_storage_index_unlocked()
         for record in index_data:
-            if record.get("task_id") == task_id or record.get("uuid") == task_id:
+            if record.get("task_id") == task_id:
                 record.update(updates)
                 _write_pdf_storage_index_unlocked(index_data)
                 return dict(record)

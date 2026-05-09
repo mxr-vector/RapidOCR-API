@@ -187,12 +187,9 @@ curl http://localhost:9003/ocr/pdf/tasks/f3c8d2d2a3d94a22a1e2f1d6b0f0a9c1
   "started_at": "2026-05-08T10:00:01+00:00",
   "finished_at": "2026-05-08T10:00:10+00:00",
   "file": {
-    "uuid": "f3c8d2d2a3d94a22a1e2f1d6b0f0a9c1",
     "knowledge": "default",
     "original_filename": "demo.pdf",
     "filename": "demo.pdf",
-    "stored_pdf_filename": "f3c8d2d2a3d94a22a1e2f1d6b0f0a9c1.pdf",
-    "result_filename": "f3c8d2d2a3d94a22a1e2f1d6b0f0a9c1.json",
     "original_file_path": "storage/default/20260508/f3c8d2d2a3d94a22a1e2f1d6b0f0a9c1.pdf",
     "result_file_path": "storage/default/20260508/f3c8d2d2a3d94a22a1e2f1d6b0f0a9c1.json",
     "file_size": 123456,
