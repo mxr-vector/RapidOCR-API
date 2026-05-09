@@ -61,8 +61,11 @@ rapidocr_api -ip 0.0.0.0 -p 9005 -workers 2
 |:---|:---|:---|
 | `GET` | `/` | 服务健康检查，返回欢迎信息 |
 | `POST` | `/ocr` | 统一 OCR 入口，支持图片文件、图片 base64，也支持 PDF 文件创建异步任务 |
+| `POST` | `/ocr/markdown` | 统一 Markdown 入口，支持图片文件、图片 base64，也支持 PDF 文件创建异步任务 |
 | `POST` | `/ocr/pdf` | PDF OCR 专用入口，创建异步任务 |
 | `GET` | `/ocr/pdf/tasks/{task_id}` | 查询 PDF OCR 任务状态和结果 |
+| `POST` | `/ocr/pdf2md` | PDF Markdown 专用入口，创建异步任务 |
+| `GET` | `/ocr/pdf2md/tasks/{task_id}` | 查询 PDF Markdown 任务状态和结果 |
 
 ##### 图片 OCR
 
@@ -96,11 +99,10 @@ with open(img_path, "rb") as f:
 print(response.json())
 ```
 
-图片 OCR 成功后返回 `OcrResult`，其中 `rec_txt_all` 是所有识别文本按空格拼接后的结果，数字键为逐行识别结果：
+图片 OCR 成功后返回 `OcrResult`，数字键为逐行识别结果：
 
 ```json
 {
-  "rec_txt_all": "识别出的完整文本",
   "0": {
     "rec_txt": "识别出的文本行",
     "dt_boxes": [[0, 0], [100, 0], [100, 30], [0, 30]],
@@ -112,10 +114,31 @@ print(response.json())
 如果 OCR 引擎没有返回文本框、文本或置信度，接口会返回空结果：
 
 ```json
+{}
+```
+
+##### 图片 Markdown
+
+`/ocr/markdown` 会调用 RapidOCR 的 `to_markdown()` 输出 Markdown 文本。该接口支持图片文件和图片 base64，参数与图片 OCR 基本一致：
+
+```bash
+curl -F image_file=@1.png http://localhost:9003/ocr/markdown
+```
+
+```bash
+curl -X POST http://localhost:9003/ocr/markdown \
+  -F "image_data=$(base64 -w 0 1.png)"
+```
+
+返回示例：
+
+```json
 {
-  "rec_txt_all": ""
+  "markdown": "识别出的 Markdown 内容"
 }
 ```
+
+Markdown 接口会自动启用 RapidOCR 的 `return_word_box` 和 `return_single_char_box`，以便生成 Markdown 结构。
 
 ##### PDF OCR
 
@@ -178,14 +201,10 @@ curl http://localhost:9003/ocr/pdf/tasks/f3c8d2d2a3d94a22a1e2f1d6b0f0a9c1
   "result_file_path": "storage/default/20260508/f3c8d2d2a3d94a22a1e2f1d6b0f0a9c1.json",
   "result": {
     "page_count": 1,
-    "rec_txt_all": "第一页识别文本",
     "pages": [
       {
         "page_no": 1,
-        "rec_txt_all": "第一页识别文本",
-        "result": {
-          "rec_txt_all": "第一页识别文本"
-        }
+        "result": {}
       }
     ]
   },
@@ -195,22 +214,66 @@ curl http://localhost:9003/ocr/pdf/tasks/f3c8d2d2a3d94a22a1e2f1d6b0f0a9c1
 
 任务失败时，`status` 为 `failed`，`error` 中包含 `status_code` 和 `detail`；任务不存在时查询接口返回 `404`。
 
+##### PDF Markdown
+
+PDF Markdown 同样使用异步任务。可以直接调用专用接口：
+
+```bash
+curl -F pdf_file=@demo.pdf \
+  -F knowledge=default \
+  http://localhost:9003/ocr/pdf2md
+```
+
+也可以把 PDF 作为 `image_file` 上传到统一 Markdown 入口：
+
+```bash
+curl -F image_file=@demo.pdf \
+  -F knowledge=default \
+  http://localhost:9003/ocr/markdown
+```
+
+创建任务返回 `task_id` 后，通过 Markdown 任务查询接口获取结果：
+
+```bash
+curl http://localhost:9003/ocr/pdf2md/tasks/f3c8d2d2a3d94a22a1e2f1d6b0f0a9c1
+```
+
+成功结果示例：
+
+```json
+{
+  "task_id": "f3c8d2d2a3d94a22a1e2f1d6b0f0a9c1",
+  "status": "succeeded",
+  "result": {
+    "page_count": 1,
+    "markdown": "第一页 Markdown 内容",
+    "pages": [
+      {
+        "page_no": 1,
+        "markdown": "第一页 Markdown 内容"
+      }
+    ]
+  },
+  "error": null
+}
+```
+
 ##### OCR 可选参数
 
-`/ocr` 和 `/ocr/pdf` 支持以下表单参数：
+`/ocr`、`/ocr/markdown`、`/ocr/pdf` 和 `/ocr/pdf2md` 支持以下表单参数：
 
 | 参数 | 类型 | 适用接口 | 说明 |
 |:---|:---|:---|:---|
-| `image_file` | `UploadFile` | `/ocr` | 图片或 PDF 文件；PDF 会创建异步任务 |
-| `image_data` | `str` | `/ocr` | 图片 base64 字符串，支持 data URI |
-| `pdf_file` | `UploadFile` | `/ocr/pdf` | PDF 文件 |
-| `knowledge` | `str` | `/ocr`、`/ocr/pdf` | PDF 上传必填；用于保存到 `storage/{knowledge}/YYYYMMDD`，图片 OCR 不需要 |
-| `use_det` | `bool` | `/ocr`、`/ocr/pdf` | 是否启用文本检测 |
-| `use_cls` | `bool` | `/ocr`、`/ocr/pdf` | 是否启用方向分类 |
-| `use_rec` | `bool` | `/ocr`、`/ocr/pdf` | 是否启用文本识别 |
-| `text_score` | `float` | `/ocr`、`/ocr/pdf` | 文本置信度阈值，范围 `0` 到 `1` |
-| `return_word_box` | `bool` | `/ocr`、`/ocr/pdf` | 透传给 RapidOCR，是否返回词级文本框 |
-| `return_single_char_box` | `bool` | `/ocr`、`/ocr/pdf` | 透传给 RapidOCR，是否返回单字符文本框 |
+| `image_file` | `UploadFile` | `/ocr`、`/ocr/markdown` | 图片或 PDF 文件；PDF 会创建异步任务 |
+| `image_data` | `str` | `/ocr`、`/ocr/markdown` | 图片 base64 字符串，支持 data URI |
+| `pdf_file` | `UploadFile` | `/ocr/pdf`、`/ocr/pdf2md` | PDF 文件 |
+| `knowledge` | `str` | `/ocr`、`/ocr/markdown`、`/ocr/pdf`、`/ocr/pdf2md` | PDF 上传必填；用于保存到 `storage/{knowledge}/YYYYMMDD`，图片 OCR 不需要 |
+| `use_det` | `bool` | 全部 OCR 接口 | 是否启用文本检测 |
+| `use_cls` | `bool` | 全部 OCR 接口 | 是否启用方向分类 |
+| `use_rec` | `bool` | 全部 OCR 接口 | 是否启用文本识别 |
+| `text_score` | `float` | 全部 OCR 接口 | 文本置信度阈值，范围 `0` 到 `1` |
+| `return_word_box` | `bool` | `/ocr`、`/ocr/pdf` | 透传给 RapidOCR，是否返回词级文本框；Markdown 接口会自动启用 |
+| `return_single_char_box` | `bool` | `/ocr`、`/ocr/pdf` | 透传给 RapidOCR，是否返回单字符文本框；Markdown 接口会自动启用 |
 
 示例：
 
@@ -226,7 +289,7 @@ curl -F image_file=@1.png \
 | 状态码 | 场景 |
 |:---|:---|
 | `400` | 未传入 `image_file` 或 `image_data`、同时传入两者、上传空文件、base64 为空或非法、图片/PDF 格式不支持、PDF 缺少或使用非法 `knowledge`、`text_score` 越界 |
-| `404` | 查询的 PDF OCR 任务不存在 |
+| `404` | 查询的 PDF OCR 或 PDF Markdown 任务不存在 |
 | `413` | 上传文件、base64 解码后二进制或 PDF 单页渲染像素数超过限制 |
 | `503` | PDF OCR 并发达到上限，或 PDF 处理超过配置的超时时间 |
 | `500` | OCR 处理过程中发生未预期错误 |
