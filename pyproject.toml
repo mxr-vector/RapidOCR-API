@@ -6,7 +6,6 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.136.1",
-    "onnxruntime>=1.25.1",
     "pymupdf>=1.26.6",
     "python-multipart>=0.0.27",
     "rapidocr>=3.8.1",
@@ -18,6 +17,25 @@ dependencies = [
 [tool.fastapi]
 entrypoint = "rapidocr_api.main:app"
 
+# 指定 extra 依赖
+[project.optional-dependencies]
+cpu = [
+  "onnxruntime",
+  "rapid-doc[cpu]"
+]
+
+gpu = [
+  "onnxruntime-gpu",
+  "rapid-doc[gpu]"
+]
+
+[tool.uv]
+conflicts = [
+  [
+    { extra = "cpu" },
+    { extra = "gpu" },
+  ],
+]
 
 # PyPI
 [[tool.uv.index]]
