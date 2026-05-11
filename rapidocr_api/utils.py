@@ -3,7 +3,6 @@ import binascii
 import io
 import json
 import math
-import os
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -14,49 +13,19 @@ import fitz
 from fastapi import HTTPException, UploadFile
 from PIL import Image, UnidentifiedImageError
 
-
-def _read_int_env(name: str, default: int) -> int:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    try:
-        parsed = int(value)
-    except ValueError as exc:
-        raise RuntimeError(f"{name} must be an integer.") from exc
-    if parsed <= 0:
-        raise RuntimeError(f"{name} must be greater than 0.")
-    return parsed
+from core.settings import (
+    KNOWLEDGE_MAX_LENGTH,
+    MAX_UPLOAD_FILE_SIZE,
+    PDF_MAX_RENDER_PIXELS,
+    PDF_MIN_RENDER_DPI,
+    PDF_RENDER_DPI,
+    PDF_STORAGE_INDEX,
+    STORAGE_DIR,
+)
 
 
-def _read_non_negative_int_env(name: str, default: int) -> int:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    try:
-        parsed = int(value)
-    except ValueError as exc:
-        raise RuntimeError(f"{name} must be an integer.") from exc
-    if parsed < 0:
-        raise RuntimeError(f"{name} must be greater than or equal to 0.")
-    return parsed
-
-
-# 只保留一个上传文件大小上限，图片、PDF 和 base64 解码后的二进制都使用同一口径。
-MAX_UPLOAD_FILE_SIZE = _read_int_env("RAPIDOCR_MAX_UPLOAD_FILE_SIZE", 20 * 1024 * 1024)
-PDF_RENDER_DPI = _read_int_env("RAPIDOCR_PDF_RENDER_DPI", 150)
-PDF_MIN_RENDER_DPI = _read_int_env("RAPIDOCR_PDF_MIN_RENDER_DPI", 72)
-PDF_MAX_RENDER_PIXELS = _read_int_env("RAPIDOCR_PDF_MAX_RENDER_PIXELS", 12_000_000)
-# 0 表示不启用 PDF 内部处理超时，异步任务默认等待后台处理完成。
-PDF_REQUEST_TIMEOUT_SECONDS = _read_non_negative_int_env("RAPIDOCR_PDF_REQUEST_TIMEOUT_SECONDS", 600)
-PDF_MAX_CONCURRENT_REQUESTS = _read_int_env("RAPIDOCR_PDF_MAX_CONCURRENT_REQUESTS", 1)
 PDF_MAGIC = b"%PDF"
-STORAGE_DIR = Path("storage")
-PDF_STORAGE_INDEX = STORAGE_DIR / "index.json"
 pdf_storage_index_lock = threading.Lock()
-KNOWLEDGE_MAX_LENGTH = 128
-
-if PDF_MIN_RENDER_DPI > PDF_RENDER_DPI:
-    raise RuntimeError("RAPIDOCR_PDF_MIN_RENDER_DPI must not exceed RAPIDOCR_PDF_RENDER_DPI.")
 
 
 @dataclass(frozen=True)

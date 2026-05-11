@@ -22,10 +22,15 @@ from PIL import Image, ImageOps
 from rapidocr import RapidOCR
 from starlette.formparsers import MultiPartParser
 
-from rapidocr_api.utils import (
+from core.settings import (
     MAX_UPLOAD_FILE_SIZE,
+    MODEL_OCR_CLS,
+    MODEL_OCR_DET,
+    MODEL_OCR_REC,
     PDF_MAX_CONCURRENT_REQUESTS,
     PDF_REQUEST_TIMEOUT_SECONDS,
+)
+from rapidocr_api.utils import (
     build_ocr_kwargs,
     decode_base64_payload,
     get_pdf_storage_record,
@@ -181,15 +186,11 @@ def _now_timestamp() -> float:
 
 class OCRAPIUtils:
     def __init__(self) -> None:
-        det_model_path = "models/RapidOCR/onnx/PP-OCRv4/det/multi_PP-OCRv3_det_mobile.onnx"
-        cls_model_path = "models/RapidOCR/onnx/PP-OCRv4/cls/ch_ppocr_mobile_v2.0_cls_mobile.onnx"
-        rec_model_path = "models/RapidOCR/onnx/PP-OCRv5/rec/ch_PP-OCRv5_rec_mobile.onnx"
-
         self.ocr = RapidOCR(
             params={
-                "Det.model_path": det_model_path,
-                "Cls.model_path": cls_model_path,
-                "Rec.model_path": rec_model_path,
+                "Det.model_path": str(MODEL_OCR_DET),
+                "Cls.model_path": str(MODEL_OCR_CLS),
+                "Rec.model_path": str(MODEL_OCR_REC),
             }
         )
 
