@@ -123,7 +123,7 @@ print(response.json())
 {}
 ```
 
-传入 `is_markdown=true` 时，接口会保留逐行识别结果，并额外返回 Markdown 和结构化排版字段，例如 `formatted_markdown`、`layout`、`content` 和 `blocks`：
+传入 `is_markdown=true` 时，接口会保留逐行识别结果，并额外返回 Markdown 和精简结构化块字段，例如 `formatted_markdown` 和 `blocks`：
 
 ```bash
 curl -F image_file=@1.png \
@@ -131,7 +131,7 @@ curl -F image_file=@1.png \
   http://localhost:9003/ocr
 ```
 
-如需同时获取 RapidDoc 版面、公式和表格模型生成的结构化字段，请使用 `/ocr` 并传入 `is_markdown=true`。图片 Markdown 模式不会自动启用 `return_word_box` 或 `return_single_char_box`。
+如需获取 RapidDoc 版面、公式和表格模型生成的结果，请使用 `/ocr` 并传入 `is_markdown=true`。图片 Markdown 模式不会自动启用 `return_word_box` 或 `return_single_char_box`。
 
 ##### PDF OCR 与 Markdown/排版恢复
 
@@ -163,7 +163,7 @@ curl -F image_file=@demo.pdf \
 
 PDF 上传时必须传入 `knowledge`，服务会把 PDF 原文件和识别结果 JSON 保存到 `{RAPIDOCR_STORAGE_DIR}/{knowledge}/YYYYMMDD` 目录下，并在 `{RAPIDOCR_STORAGE_DIR}/index.json` 中记录任务索引。默认 `RAPIDOCR_STORAGE_DIR` 是项目根目录下的 `storage` 绝对路径，任务索引和 API 响应中的路径字段统一使用 `/` 分隔符。`knowledge` 会作为目录名使用，不能为空，长度不能超过 128，不能包含 `/`、`\\`、`:`、控制字符或 `..`。
 
-传入 `is_markdown=true` 时，`/ocr/pdf` 会创建 Markdown/排版恢复任务，使用 RapidDoc 生成 Markdown，并返回 `layout`、`content` 和归一化 `blocks`。PDF Markdown 模式主要由 RapidDoc 处理，普通 OCR 的检测、识别、置信度和 word/char box 参数不作为该模式的主要控制项：
+传入 `is_markdown=true` 时，`/ocr/pdf` 会创建 Markdown/排版恢复任务，使用 RapidDoc 生成 Markdown，并返回归一化 `blocks`。PDF Markdown 模式主要由 RapidDoc 处理，普通 OCR 的检测、识别、置信度和 word/char box 参数不作为该模式的主要控制项：
 
 ```bash
 curl -F pdf_file=@demo.pdf \
@@ -229,18 +229,16 @@ Markdown/排版恢复任务成功结果示例：
       {
         "page_no": 1,
         "markdown": "第一页 Markdown 内容",
-        "layout": {"pdf_info": []},
-        "content": [{"type": "text", "text": "第一页 Markdown 内容"}],
-        "blocks": [{"page_no": 1, "type": "text", "text": "第一页 Markdown 内容"}]
+        "blocks": [{"page_no": 1, "type": "text", "content": "第一页 Markdown 内容"}]
       }
     ],
-    "blocks": [{"page_no": 1, "type": "text", "text": "第一页 Markdown 内容"}]
+    "blocks": [{"page_no": 1, "type": "text", "content": "第一页 Markdown 内容"}]
   },
   "error": null
 }
 ```
 
-`content` 和 `layout` 为 RapidDoc 原始结构化结果，`blocks` 是面向前端恢复段落、标题、表格、公式等块类型的归一化列表。
+`blocks` 是面向前端恢复段落、标题、表格、图片、公式等块类型的归一化列表，`type` 会统一标记识别出的内容类型。
 
 ##### OCR 可选参数
 

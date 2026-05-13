@@ -27,12 +27,10 @@ class PdfResult(BaseModel):
 
 
 class PdfMarkdownPageResult(BaseModel):
-    """PDF 单页 Markdown 与结构化排版结果。"""
+    """PDF 单页 Markdown 与精简结构化块结果。"""
 
     page_no: int
     markdown: str
-    layout: Any | None = None
-    content: list[Any] | None = None
     blocks: list[dict[str, Any]] | None = None
 
 

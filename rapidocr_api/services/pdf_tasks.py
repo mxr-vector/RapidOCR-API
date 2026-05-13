@@ -31,7 +31,7 @@ from rapidocr_api.schemas.ocr import (
     PdfTask,
     PdfTaskCreated,
 )
-from rapidocr_api.services.document import extract_document_blocks, format_image_document
+from rapidocr_api.services.document import format_image_document
 from rapidocr_api.services.ocr import processor
 from rapidocr_api.services.utils import (
     build_ocr_kwargs,
@@ -440,9 +440,7 @@ def process_pdf_markdown(
         PdfMarkdownPageResult(
             page_no=page_no,
             markdown=page["formatted_markdown"],
-            layout=page.get("layout"),
-            content=page.get("content"),
-            blocks=extract_document_blocks(page.get("content"), page_no),
+            blocks=[{**block, "page_no": page_no} for block in page.get("blocks", [])],
         )
         for page_no, page in enumerate(rendered.page_results, start=1)
     ]
