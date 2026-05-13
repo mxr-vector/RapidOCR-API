@@ -46,7 +46,7 @@ def posix_path(path: str | Path) -> str:
 
 
 # 项目和模型根目录配置：允许通过环境变量覆盖，便于容器化部署时挂载外部模型目录。
-PROJECT_ROOT = _read_path_env("RAPIDOCR_PROJECT_ROOT", Path(__file__).resolve().parent.parent)
+PROJECT_ROOT = _read_path_env("RAPIDOCR_PROJECT_ROOT", Path(__file__).resolve().parents[2])
 MODEL_ROOT = _read_path_env("RAPIDOCR_MODEL_ROOT", PROJECT_ROOT / "models")
 RAPIDOCR_MODEL_ROOT = _read_path_env("RAPIDOCR_MODEL_RAPIDOCR_ROOT", MODEL_ROOT / "RapidOCR")
 RAPIDDOC_MODEL_ROOT = _read_path_env("RAPIDOCR_MODEL_RAPIDDOC_ROOT", MODEL_ROOT / "RapidDoc")

@@ -10,8 +10,8 @@
   <a href=""><img src="https://img.shields.io/badge/OS-Linux%2C%20Win%2C%20Mac-pink.svg"></a>
   <a href="https://github.com/RapidAI/RapidOCRAPI/graphs/contributors"><img src="https://img.shields.io/github/contributors/RapidAI/RapidOCRAPI?color=9ea"></a>
   <a href="https://github.com/RapidAI/RapidOCRAPI/stargazers"><img src="https://img.shields.io/github/stars/RapidAI/RapidOCRAPI?color=ccf" ></a>
-  <a href="https://pypistats.org/packages/rapidocr_api"><img src="https://img.shields.io/pypi/dm/rapidocr_api?style=flat&label=rapidocr_api"></a>
-  <a href="https://pypi.org/project/rapidocr_api/"><img alt="PyPI" src="https://img.shields.io/pypi/v/rapidocr_api"></a>
+  <a href="https://pypistats.org/packages/rapidocrapi"><img src="https://img.shields.io/pypi/dm/rapidocrapi?style=flat&label=rapidocrapi"></a>
+  <a href="https://pypi.org/project/rapidocrapi/"><img alt="PyPI" src="https://img.shields.io/pypi/v/rapidocrapi"></a>
   <a href="https://choosealicense.com/licenses/apache-2.0/"><img src="https://img.shields.io/badge/License-Apache%202-dfd.svg"></a>
   <a href="https://semver.org/"><img alt="SemVer2.0" src="https://img.shields.io/badge/SemVer-2.0-brightgreen"></a>
   <a href="https://github.com/psf/black"><img src="https://img.shields.io/badge/code%20style-black-000000.svg"></a>
@@ -20,21 +20,29 @@
 
 ### 📖 简介
 
-- 该包是将[rapidocr](./rapidocr/install.md)库做了API封装，采用[FastAPI](https://fastapi.tiangolo.com/) + [uvicorn](https://www.uvicorn.org/)实现。
-- 定位是一个快速调用`rapidocr`的API接口，没有考虑多进程处理并发请求，如果有这需求的小伙伴，可以看看[gunicorn](https://gunicorn.org/)等。
+- 该包是将 [RapidOCR](https://github.com/RapidAI/RapidOCR) 库做了 API 封装，采用 [FastAPI](https://fastapi.tiangolo.com/) + [uvicorn](https://www.uvicorn.org/) 实现。
+- 定位是一个快速调用 `rapidocr` 的 API 接口，没有考虑多进程处理并发请求，如果有这需求的小伙伴，可以看看 [gunicorn](https://gunicorn.org/) 等。
 
 ### 📌 版本依赖关系
 
-|`rapidocr_api`|`rapidocr`|
+|`rapidocrapi`|`rapidocr`|
 |:---|:---|
-|`v0.2.x`|`rapidocr>1.0.0,<3.0.0`|
-|`v0.1.x`|`rapidocr_onnxruntime`|
+|`v0.1.0`|`rapidocr>=3.8.1`|
 
 ### 🛠️ 安装
 
 ```bash linenums="1"
+# 基础依赖
 uv sync
+
+# CPU 环境，包含 onnxruntime 与 RapidDoc
+uv sync --extra cpu
+
+# GPU 环境，包含 onnxruntime-gpu 与 RapidDoc
+uv sync --extra gpu
 ```
+
+如需使用 `is_markdown=true` 的 Markdown 与结构化排版恢复能力，请安装 `cpu` 或 `gpu` extra。
 
 ### 模型下载
 
@@ -48,8 +56,8 @@ uv sync
 ```bash
 # 默认参数启动
 uv run rapidocr_api/main.py
-# 指定参数：端口与进程数量；
-rapidocr_api -ip 0.0.0.0 -p 9005 -workers 2
+# 指定参数：监听地址、端口与进程数量
+uv run rapidocr_api/main.py -ip 0.0.0.0 -p 9005 -workers 2
 ```
 
 #### 📞 调用服务
@@ -61,8 +69,8 @@ rapidocr_api -ip 0.0.0.0 -p 9005 -workers 2
 | 方法 | 路径 | 说明 |
 |:---|:---|:---|
 | `GET` | `/` | 服务健康检查，返回欢迎信息 |
-| `POST` | `/ocr` | 统一 OCR 入口，支持图片文件、图片 base64，也支持 PDF 文件创建异步任务 |
-| `POST` | `/ocr/pdf` | PDF 专用入口，根据 `is_markdown` 创建 OCR 或 Markdown/排版恢复异步任务 |
+| `POST` | `/ocr` | 统一 OCR 入口，支持图片文件、图片 base64；上传 PDF 文件时创建异步任务 |
+| `POST` | `/ocr/pdf` | PDF 专用文件上传入口，根据 `is_markdown` 创建 OCR 或 Markdown/排版恢复异步任务 |
 | `GET` | `/ocr/pdf/tasks/{task_id}` | 查询 PDF 任务状态和结果 |
 
 ##### 图片 OCR
@@ -80,7 +88,7 @@ curl -X POST http://localhost:9003/ocr \
   -F "image_data=$(base64 -w 0 1.png)"
 ```
 
-> `image_file` 和 `image_data` 只能二选一；同时传入会返回 `400`。
+> `image_file` 和 `image_data` 只能二选一；同时传入会返回 `400`。`image_data` 仅支持图片 base64，不会把 PDF base64 自动创建为 PDF 异步任务。
 
 🐍 Python 脚本使用：
 
@@ -123,7 +131,7 @@ curl -F image_file=@1.png \
   http://localhost:9003/ocr
 ```
 
-如需同时获取 RapidDoc 版面、公式和表格模型生成的结构化字段，请使用 `/ocr` 并传入 `is_markdown=true`。
+如需同时获取 RapidDoc 版面、公式和表格模型生成的结构化字段，请使用 `/ocr` 并传入 `is_markdown=true`。图片 Markdown 模式不会自动启用 `return_word_box` 或 `return_single_char_box`。
 
 ##### PDF OCR 与 Markdown/排版恢复
 
@@ -153,9 +161,9 @@ curl -F image_file=@demo.pdf \
 }
 ```
 
-PDF 上传时必须传入 `knowledge`，服务会把 PDF 原文件和识别结果 JSON 保存到 `storage/{knowledge}/YYYYMMDD` 目录下，并在 `storage/index.json` 中记录任务索引。`knowledge` 会作为目录名使用，不能为空，长度不能超过 128，不能包含 `/`、`\\`、`:`、控制字符或 `..`。
+PDF 上传时必须传入 `knowledge`，服务会把 PDF 原文件和识别结果 JSON 保存到 `{RAPIDOCR_STORAGE_DIR}/{knowledge}/YYYYMMDD` 目录下，并在 `{RAPIDOCR_STORAGE_DIR}/index.json` 中记录任务索引。默认 `RAPIDOCR_STORAGE_DIR` 是项目根目录下的 `storage` 绝对路径，任务索引和 API 响应中的路径字段统一使用 `/` 分隔符。`knowledge` 会作为目录名使用，不能为空，长度不能超过 128，不能包含 `/`、`\\`、`:`、控制字符或 `..`。
 
-传入 `is_markdown=true` 时，`/ocr/pdf` 会创建 Markdown/排版恢复任务，使用 RapidDoc 生成 Markdown，并返回 `layout`、`content` 和归一化 `blocks`：
+传入 `is_markdown=true` 时，`/ocr/pdf` 会创建 Markdown/排版恢复任务，使用 RapidDoc 生成 Markdown，并返回 `layout`、`content` 和归一化 `blocks`。PDF Markdown 模式主要由 RapidDoc 处理，普通 OCR 的检测、识别、置信度和 word/char box 参数不作为该模式的主要控制项：
 
 ```bash
 curl -F pdf_file=@demo.pdf \
@@ -180,18 +188,18 @@ curl http://localhost:9003/ocr/pdf/tasks/f3c8d2d2a3d94a22a1e2f1d6b0f0a9c1
   "status": "succeeded",
   "result_type": "ocr",
   "created_at": "2026-05-08T10:00:00+00:00",
-  "started_at": "2026-05-08T10:00:01+00:00",
-  "finished_at": "2026-05-08T10:00:10+00:00",
+  "started_at": 1778234401.123456,
+  "finished_at": 1778234410.654321,
   "file": {
     "knowledge": "default",
     "original_filename": "demo.pdf",
     "filename": "demo.pdf",
-    "original_file_path": "storage/default/20260508/f3c8d2d2a3d94a22a1e2f1d6b0f0a9c1.pdf",
-    "result_file_path": "storage/default/20260508/f3c8d2d2a3d94a22a1e2f1d6b0f0a9c1.json",
+    "original_file_path": "D:/pyProject/RapidOCRAPI/storage/default/20260508/f3c8d2d2a3d94a22a1e2f1d6b0f0a9c1.pdf",
+    "result_file_path": "D:/pyProject/RapidOCRAPI/storage/default/20260508/f3c8d2d2a3d94a22a1e2f1d6b0f0a9c1.json",
     "file_size": 123456,
     "created_at": "2026-05-08T10:00:00+00:00"
   },
-  "result_file_path": "storage/default/20260508/f3c8d2d2a3d94a22a1e2f1d6b0f0a9c1.json",
+  "result_file_path": "D:/pyProject/RapidOCRAPI/storage/default/20260508/f3c8d2d2a3d94a22a1e2f1d6b0f0a9c1.json",
   "result": {
     "page_count": 1,
     "pages": [
@@ -241,15 +249,15 @@ Markdown/排版恢复任务成功结果示例：
 | 参数 | 类型 | 适用接口 | 说明 |
 |:---|:---|:---|:---|
 | `image_file` | `UploadFile` | `/ocr` | 图片文件；`/ocr` 也支持 PDF 文件创建异步任务 |
-| `image_data` | `str` | `/ocr` | 图片 base64 字符串，支持 data URI |
+| `image_data` | `str` | `/ocr` | 图片 base64 字符串，支持 data URI；不支持 PDF base64 异步建任务 |
 | `pdf_file` | `UploadFile` | `/ocr/pdf` | PDF 文件 |
-| `knowledge` | `str` | `/ocr`、`/ocr/pdf` | PDF 上传必填；用于保存到 `storage/{knowledge}/YYYYMMDD`，图片 OCR 不需要 |
-| `use_det` | `bool` | 全部 OCR 接口 | 是否启用文本检测 |
-| `use_cls` | `bool` | 全部 OCR 接口 | 是否启用方向分类 |
-| `use_rec` | `bool` | 全部 OCR 接口 | 是否启用文本识别 |
-| `text_score` | `float` | 全部 OCR 接口 | 文本置信度阈值，范围 `0` 到 `1` |
-| `return_word_box` | `bool` | `/ocr`、`/ocr/pdf` | 透传给 RapidOCR，是否返回词级文本框；Markdown 模式会自动启用 |
-| `return_single_char_box` | `bool` | `/ocr`、`/ocr/pdf` | 透传给 RapidOCR，是否返回单字符文本框；Markdown 模式会自动启用 |
+| `knowledge` | `str` | `/ocr`、`/ocr/pdf` | PDF 上传必填；用于保存到 `{RAPIDOCR_STORAGE_DIR}/{knowledge}/YYYYMMDD`，图片 OCR 不需要 |
+| `use_det` | `bool` | OCR 模式 | 是否启用文本检测；PDF Markdown 模式主要由 RapidDoc 处理 |
+| `use_cls` | `bool` | OCR 模式 | 是否启用方向分类；PDF Markdown 模式主要由 RapidDoc 处理 |
+| `use_rec` | `bool` | OCR 模式 | 是否启用文本识别；PDF Markdown 模式主要由 RapidDoc 处理 |
+| `text_score` | `float` | OCR 模式 | 文本置信度阈值，范围 `0` 到 `1`；PDF Markdown 模式主要由 RapidDoc 处理 |
+| `return_word_box` | `bool` | OCR 模式 | 透传给 RapidOCR，是否返回词级文本框 |
+| `return_single_char_box` | `bool` | OCR 模式 | 透传给 RapidOCR，是否返回单字符文本框 |
 | `is_markdown` | `bool` | `/ocr`、`/ocr/pdf` | 是否返回 Markdown 与结构化排版信息，默认 `false` |
 
 示例：
@@ -265,15 +273,18 @@ curl -F image_file=@1.png \
 
 | 状态码 | 场景 |
 |:---|:---|
-| `400` | 未传入 `image_file` 或 `image_data`、同时传入两者、上传空文件、base64 为空或非法、图片/PDF 格式不支持、PDF 缺少或使用非法 `knowledge`、`text_score` 越界 |
+| `400` | 未传入 `image_file` 或 `image_data`、同时传入两者、上传空文件、base64 为空或非法、图片/PDF 格式不支持、PDF 缺少或使用非法 `knowledge` |
 | `404` | 查询的 PDF 任务不存在 |
 | `413` | 上传文件、base64 解码后二进制或 PDF 单页渲染像素数超过限制 |
-| `503` | PDF OCR 并发达到上限，或 PDF 处理超过配置的超时时间 |
+| `422` | 表单必填字段缺失、参数类型错误或 `text_score` 越界等 FastAPI 参数校验失败 |
+| `503` | PDF 后台任务并发达到上限，或 PDF 处理超过配置的超时时间 |
 | `500` | OCR 处理过程中发生未预期错误 |
+
+PDF 创建接口通常先返回 `202`。PDF 渲染超限、处理超时、后台异常等处理阶段错误会记录在任务查询结果的 `status="failed"` 和 `error.status_code` 中，不一定作为创建接口的 HTTP 状态码直接返回。
 
 ##### 运行时配置
 
-可通过环境变量调整上传、PDF 渲染处理、存储和模型路径配置。数值配置会在启动阶段校验；路径配置建议在 Linux 容器中使用 `/path/to/...` 形式，服务内部会转换为平台路径，任务索引和 API 响应中的路径字段统一使用 `/` 分隔符。
+可通过环境变量调整上传、PDF 渲染处理、存储和模型路径配置。数值配置会在启动阶段校验；路径配置建议在 Linux 容器中使用 `/path/to/...` 形式，服务内部会转换为平台路径，任务索引和 API 响应中的路径字段统一使用 `/` 分隔符。默认 `RAPIDOCR_STORAGE_DIR` 是项目根目录下的绝对路径。
 
 | 环境变量 | 默认值 | 说明 |
 |:---|:---|:---|
@@ -290,7 +301,7 @@ curl -F image_file=@1.png \
 | `RAPIDOCR_PDF_MAX_CONCURRENT_REQUESTS` | `1` | PDF OCR 最大并发处理数，也是后台 PDF 任务线程池大小 |
 | `RAPIDOCR_PDF_PAGE_WORKERS` | `1` | 单个 PDF 内部页级 OCR worker 数；默认串行，增大可加速多页 PDF 但会增加 CPU/内存占用 |
 | `RAPIDOCR_KNOWLEDGE_MAX_LENGTH` | `128` | PDF 存储目录中 `knowledge` 段的最大长度 |
-| `RAPIDOCR_MODEL_OCR_DET` | `{RAPIDOCR_MODEL_RAPIDOCR_ROOT}/onnx/PP-OCRv5/det/multi_PP-ch_PP-OCRv5_det_mobile.onnx` | OCR 检测模型路径 |
+| `RAPIDOCR_MODEL_OCR_DET` | `{RAPIDOCR_MODEL_RAPIDOCR_ROOT}/onnx/PP-OCRv5/det/ch_PP-OCRv5_det_mobile.onnx` | OCR 检测模型路径 |
 | `RAPIDOCR_MODEL_OCR_CLS` | `{RAPIDOCR_MODEL_RAPIDOCR_ROOT}/onnx/PP-OCRv5/cls/ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx` | OCR 方向分类模型路径 |
 | `RAPIDOCR_MODEL_OCR_REC` | `{RAPIDOCR_MODEL_RAPIDOCR_ROOT}/onnx/PP-OCRv5/rec/ch_PP-OCRv5_rec_mobile.onnx` | OCR 文本识别模型路径 |
 | `RAPIDOCR_MODEL_PAGE_LAYOUT` | `{RAPIDOCR_MODEL_RAPIDDOC_ROOT}/layout/PP-DocLayoutV2/pp_doclayoutv2.onnx` | RapidDoc 版面识别模型路径 |

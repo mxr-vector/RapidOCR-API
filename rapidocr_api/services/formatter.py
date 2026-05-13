@@ -7,7 +7,7 @@ from typing import Any
 from PIL import Image
 from rapidocr import OCRVersion
 
-from core.settings import (
+from rapidocr_api.core.settings import (
     MODEL_FORMULA_RECOGNITION,
     MODEL_OCR_CLS,
     MODEL_OCR_DET,
@@ -56,7 +56,6 @@ class DocumentFormatter:
     """
 
     def __init__(self, rapid_doc_class: type[Any] | None = None) -> None:
-        # 测试可通过传入自定义类来替换真实 RapidDoc，实现依赖解耦。
         self._rapid_doc_class = rapid_doc_class
 
     @cached_property
@@ -98,5 +97,4 @@ class DocumentFormatter:
         )
 
 
-# 模块级单例：应用运行期共享同一个格式化器，避免重复加载模型。
 formatter = DocumentFormatter()
