@@ -123,7 +123,7 @@ print(response.json())
 {}
 ```
 
-传入 `is_markdown=true` 时，接口会保留逐行识别结果，并额外返回 Markdown 和精简结构化块字段，例如 `formatted_markdown` 和 `blocks`：
+传入 `is_markdown=true` 时，接口会保留逐行识别结果，并额外返回 Markdown 和精简结构化块字段，例如 `markdown`、`blocks` 和 `resources`：
 
 ```bash
 curl -F image_file=@1.png \
@@ -163,7 +163,7 @@ curl -F image_file=@demo.pdf \
 
 PDF 上传时必须传入 `knowledge`，服务会把 PDF 原文件和识别结果 JSON 保存到 `{RAPIDOCR_STORAGE_DIR}/{knowledge}/YYYYMMDD` 目录下，并在 `{RAPIDOCR_STORAGE_DIR}/index.json` 中记录任务索引。默认 `RAPIDOCR_STORAGE_DIR` 是项目根目录下的 `storage` 绝对路径，任务索引和 API 响应中的路径字段统一使用 `/` 分隔符。`knowledge` 会作为目录名使用，不能为空，长度不能超过 128，不能包含 `/`、`\\`、`:`、控制字符或 `..`。
 
-传入 `is_markdown=true` 时，`/ocr/pdf` 会创建 Markdown/排版恢复任务，使用 RapidDoc 生成 Markdown，并返回归一化 `blocks`。PDF Markdown 模式主要由 RapidDoc 处理，普通 OCR 的检测、识别、置信度和 word/char box 参数不作为该模式的主要控制项：
+传入 `is_markdown=true` 时，`/ocr/pdf` 会创建 Markdown/排版恢复任务，使用 RapidDoc 生成 Markdown，并在每页结果中返回 `blocks`、`layout` 和 `resources`。PDF Markdown 模式主要由 RapidDoc 处理，普通 OCR 的检测、识别、置信度和 word/char box 参数不作为该模式的主要控制项：
 
 ```bash
 curl -F pdf_file=@demo.pdf \
@@ -200,6 +200,11 @@ curl http://localhost:9003/ocr/pdf/tasks/f3c8d2d2a3d94a22a1e2f1d6b0f0a9c1
     "created_at": "2026-05-08T10:00:00+00:00"
   },
   "result_file_path": "D:/pyProject/RapidOCRAPI/storage/default/20260508/f3c8d2d2a3d94a22a1e2f1d6b0f0a9c1.json",
+  "result_file_exists": true,
+  "result_available": true,
+  "page_count": 1,
+  "processed_pages": 1,
+  "current_page": 1,
   "result": {
     "page_count": 1,
     "pages": [
@@ -229,16 +234,17 @@ Markdown/排版恢复任务成功结果示例：
       {
         "page_no": 1,
         "markdown": "第一页 Markdown 内容",
-        "blocks": [{"page_no": 1, "type": "text", "content": "第一页 Markdown 内容"}]
+        "blocks": [{"page_no": 1, "type": "text", "content": "第一页 Markdown 内容"}],
+        "layout": {"blocks": []},
+        "resources": []
       }
-    ],
-    "blocks": [{"page_no": 1, "type": "text", "content": "第一页 Markdown 内容"}]
+    ]
   },
   "error": null
 }
 ```
 
-`blocks` 是面向前端恢复段落、标题、表格、图片、公式等块类型的归一化列表，`type` 会统一标记识别出的内容类型。
+PDF Markdown 结果顶层只保留整份文档的 `page_count`、拼接后的 `markdown` 和分页明细 `pages`；每个 `pages[*]` 内的 `blocks` 是面向前端恢复段落、标题、表格、图片、公式等块类型的归一化列表，`resources` 保存该页引用的资源信息。
 
 ##### OCR 可选参数
 

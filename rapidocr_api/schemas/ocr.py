@@ -67,14 +67,13 @@ class PdfMarkdownPageResult(BaseModel):
     blocks: list[PdfMarkdownBlock] = Field(default_factory=list)
     layout: dict[str, Any] | None = None
     resources: list[PdfDocumentResource] = Field(default_factory=list)
-    images: list[PdfDocumentResource] = Field(default_factory=list)
 
     @field_validator("markdown", mode="before")
     @classmethod
     def default_markdown(cls, value: Any) -> str:
         return "" if value is None else value
 
-    @field_validator("blocks", "resources", "images", mode="before")
+    @field_validator("blocks", "resources", mode="before")
     @classmethod
     def default_lists(cls, value: Any) -> list[Any]:
         return [] if value is None else value
@@ -86,20 +85,11 @@ class PdfMarkdownResult(BaseModel):
     page_count: int
     markdown: str = ""
     pages: list[PdfMarkdownPageResult]
-    blocks: list[PdfMarkdownBlock] = Field(default_factory=list)
-    layout: dict[str, Any] | None = None
-    resources: list[PdfDocumentResource] = Field(default_factory=list)
-    images: list[PdfDocumentResource] = Field(default_factory=list)
 
     @field_validator("markdown", mode="before")
     @classmethod
     def default_markdown(cls, value: Any) -> str:
         return "" if value is None else value
-
-    @field_validator("blocks", "resources", "images", mode="before")
-    @classmethod
-    def default_lists(cls, value: Any) -> list[Any]:
-        return [] if value is None else value
 
 
 class PdfRenderStat(BaseModel):

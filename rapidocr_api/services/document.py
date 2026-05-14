@@ -1,10 +1,13 @@
 import base64
+import binascii
+import re
 from collections.abc import Mapping
 from typing import Any
 
 from PIL import Image
 from pydantic import BaseModel, ConfigDict
 
+from rapidocr_api.core.settings import PDF_MARKDOWN_IMAGE_DIR, PDF_MARKDOWN_IMAGE_URL_BASE
 from rapidocr_api.services.formatter import formatter
 
 
@@ -180,15 +183,150 @@ def extract_document_blocks(
     return blocks
 
 
+_IMAGE_EXTENSIONS = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+}
+_MARKDOWN_IMAGE_PATTERN = re.compile(r"(!\[[^\]]*\]\()([^)]*)(\))")
+_HTML_IMAGE_SRC_PATTERN = re.compile(r"(<img\b[^>]*\bsrc\s*=\s*[\"'])([^\"']+)([\"'])", re.IGNORECASE)
+_REFERENCE_FIELD_NAMES = {"img_path", "path", "src", "image_path"}
+
+
+def _resource_extension(mime_type: str | None, data: bytes) -> str:
+    detected_mime_type = mime_type or _bytes_mime_type(data)
+    return _IMAGE_EXTENSIONS.get(detected_mime_type or "", ".bin")
+
+
+def _safe_asset_stem(resource_id: Any) -> str:
+    stem = re.sub(r"[^A-Za-z0-9_-]+", "-", str(resource_id)).strip("-")
+    return stem[:80] or "image"
+
+
+def _decode_resource_data(resource: dict[str, Any]) -> tuple[bytes, str | None] | None:
+    data = resource.get("data")
+    if not isinstance(data, str) or not data:
+        return None
+    mime_type = resource.get("mime_type") if isinstance(resource.get("mime_type"), str) else None
+    try:
+        if data.startswith("data:"):
+            header, encoded = data.split(",", 1)
+            mime_type = _resource_mime_type(header) or mime_type
+            if ";base64" not in header:
+                return None
+            return base64.b64decode(encoded, validate=True), mime_type
+        return base64.b64decode(data, validate=True), mime_type
+    except (ValueError, binascii.Error):
+        return None
+
+
+def _asset_url(task_id: str, filename: str) -> str:
+    return f"{PDF_MARKDOWN_IMAGE_URL_BASE.rstrip('/')}/{task_id}/{filename}"
+
+
+def _persist_image_resource(
+    resource: dict[str, Any],
+    task_id: str,
+    page_no: int,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    updated = dict(resource)
+    replacement: dict[str, str] = {}
+    existing_path = updated.get("path")
+    if isinstance(existing_path, str) and existing_path:
+        for key in (updated.get("resource_id"), updated.get("source_path"), existing_path):
+            if key:
+                replacement[str(key)] = existing_path
+        return updated, replacement
+
+    decoded = _decode_resource_data(updated)
+    if decoded is None:
+        return updated, replacement
+
+    data, mime_type = decoded
+    resource_id = updated.get("resource_id") or updated.get("source_path") or "image"
+    filename = f"p{page_no}-{_safe_asset_stem(resource_id)}{_resource_extension(mime_type, data)}"
+    target_dir = PDF_MARKDOWN_IMAGE_DIR / task_id
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / filename).write_bytes(data)
+
+    url = _asset_url(task_id, filename)
+    for key in (updated.get("resource_id"), updated.get("source_path"), updated.get("data")):
+        if key:
+            replacement[str(key)] = url
+    updated["data_type"] = "url"
+    updated["mime_type"] = mime_type or _bytes_mime_type(data)
+    updated["data"] = None
+    updated["path"] = url
+    updated["size_bytes"] = len(data)
+    return updated, replacement
+
+
+def _replace_image_references(value: str, replacements: dict[str, str]) -> str:
+    if not replacements:
+        return value
+
+    def replace_markdown(match: re.Match[str]) -> str:
+        target = match.group(2)
+        return f"{match.group(1)}{replacements.get(target, target)}{match.group(3)}"
+
+    def replace_html(match: re.Match[str]) -> str:
+        target = match.group(2)
+        return f"{match.group(1)}{replacements.get(target, target)}{match.group(3)}"
+
+    updated = _MARKDOWN_IMAGE_PATTERN.sub(replace_markdown, value)
+    updated = _HTML_IMAGE_SRC_PATTERN.sub(replace_html, updated)
+    for old, new in sorted(replacements.items(), key=lambda item: len(item[0]), reverse=True):
+        if old.startswith("data:image/"):
+            updated = updated.replace(old, new)
+    return updated
+
+
+def _replace_structured_references(value: Any, replacements: dict[str, str], key: str | None = None) -> Any:
+    if isinstance(value, dict):
+        return {item_key: _replace_structured_references(item_value, replacements, str(item_key)) for item_key, item_value in value.items()}
+    if isinstance(value, list):
+        return [_replace_structured_references(item, replacements, key) for item in value]
+    if isinstance(value, str):
+        if key in _REFERENCE_FIELD_NAMES and value in replacements:
+            return replacements[value]
+        return _replace_image_references(value, replacements)
+    return value
+
+
+def finalize_pdf_markdown_page_assets(page: dict[str, Any], task_id: str | None, page_no: int) -> dict[str, Any]:
+    """将 PDF Markdown 页内图片资源落盘，并把结果中的图片引用改为 URL。"""
+    if task_id is None:
+        return page
+
+    replacements: dict[str, str] = {}
+    resources: list[dict[str, Any]] = []
+    for resource in page.get("resources", []):
+        if not isinstance(resource, dict) or resource.get("resource_type") != "image":
+            resources.append(resource)
+            continue
+        updated_resource, resource_replacements = _persist_image_resource(resource, task_id, page_no)
+        resources.append(updated_resource)
+        replacements.update(resource_replacements)
+
+    updated_page = dict(page)
+    updated_page["resources"] = resources
+    markdown = updated_page.get("markdown")
+    if isinstance(markdown, str):
+        updated_page["markdown"] = _replace_image_references(markdown, replacements)
+    updated_page["blocks"] = _replace_structured_references(updated_page.get("blocks", []), replacements)
+    updated_page["layout"] = _replace_structured_references(updated_page.get("layout"), replacements)
+    return updated_page
+
+
 def format_image_document(image: Image.Image, page_no: int | None = None) -> dict[str, Any]:
     """调用文档格式化器并返回 Markdown、版面和资源信息。"""
     formatted = formatter.format_image(image)
     resources = normalize_document_resources(formatted.images, page_no)
     blocks = extract_document_blocks(formatted.content, page_no, resources)
     return {
-        "formatted_markdown": formatted.markdown,
+        "markdown": formatted.markdown,
         "blocks": blocks,
         "layout": formatted.layout,
         "resources": resources,
-        "images": [resource for resource in resources if resource.get("resource_type") == "image"],
     }

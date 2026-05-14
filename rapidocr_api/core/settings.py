@@ -40,6 +40,16 @@ def _read_path_env(name: str, default: str | Path) -> Path:
     return Path(value)
 
 
+def _read_str_env(name: str, default: str) -> str:
+    """读取字符串类型的环境变量，空字符串视为非法配置。"""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    if not value.strip():
+        raise RuntimeError(f"{name} must not be empty.")
+    return value
+
+
 def posix_path(path: str | Path) -> str:
     """将路径统一转换为 POSIX 风格字符串，便于跨平台写入索引和结果文件。"""
     return Path(path).as_posix()
@@ -68,6 +78,15 @@ PDF_PAGE_WORKERS = _read_int_env("RAPIDOCR_PDF_PAGE_WORKERS", 1)
 KNOWLEDGE_MAX_LENGTH = _read_int_env("RAPIDOCR_KNOWLEDGE_MAX_LENGTH", 128)
 STORAGE_DIR = _read_path_env("RAPIDOCR_STORAGE_DIR", PROJECT_ROOT / "storage")
 PDF_STORAGE_INDEX = STORAGE_DIR / "index.json"
+
+# 公开静态资源配置：PDF Markdown 图片默认写入 public/pdf-images 并通过 /public 访问。
+PUBLIC_DIR = _read_path_env("RAPIDOCR_PUBLIC_DIR", PROJECT_ROOT / "public")
+PUBLIC_ROUTE_PREFIX = _read_str_env("RAPIDOCR_PUBLIC_ROUTE_PREFIX", "/public")
+PDF_MARKDOWN_IMAGE_DIR = _read_path_env("RAPIDOCR_PDF_MARKDOWN_IMAGE_DIR", PUBLIC_DIR / "pdf-images")
+PDF_MARKDOWN_IMAGE_URL_BASE = _read_str_env(
+    "RAPIDOCR_PDF_MARKDOWN_IMAGE_URL_BASE",
+    f"{PUBLIC_ROUTE_PREFIX.rstrip('/')}/pdf-images",
+)
 
 # OCR 模型路径配置：用于 RapidOCR 的检测、方向分类和文本行识别模型。
 MODEL_OCR_DET = _read_path_env(
@@ -110,3 +129,11 @@ if PDF_MAX_RENDER_PIXELS < 1:
 # 防御性检查：避免将存储目录误配置为文件系统根目录导致误操作。
 if STORAGE_DIR == STORAGE_DIR.parent:
     raise RuntimeError("RAPIDOCR_STORAGE_DIR must not be a filesystem root.")
+if PUBLIC_DIR == PUBLIC_DIR.parent:
+    raise RuntimeError("RAPIDOCR_PUBLIC_DIR must not be a filesystem root.")
+if PDF_MARKDOWN_IMAGE_DIR == PDF_MARKDOWN_IMAGE_DIR.parent:
+    raise RuntimeError("RAPIDOCR_PDF_MARKDOWN_IMAGE_DIR must not be a filesystem root.")
+if not PUBLIC_ROUTE_PREFIX.startswith("/"):
+    raise RuntimeError("RAPIDOCR_PUBLIC_ROUTE_PREFIX must start with '/'.")
+if not PDF_MARKDOWN_IMAGE_URL_BASE.startswith(("/", "http://", "https://")):
+    raise RuntimeError("RAPIDOCR_PDF_MARKDOWN_IMAGE_URL_BASE must be a URL or an absolute route path.")

@@ -9,8 +9,9 @@ if __package__ in {None, ""}:
 import uvicorn
 from fastapi import FastAPI
 from starlette.formparsers import MultiPartParser
+from starlette.staticfiles import StaticFiles
 
-from rapidocr_api.core.settings import MAX_UPLOAD_FILE_SIZE
+from rapidocr_api.core.settings import MAX_UPLOAD_FILE_SIZE, PUBLIC_DIR, PUBLIC_ROUTE_PREFIX
 from rapidocr_api.api.routes import router
 from rapidocr_api.core.constants import (
     APP_IMPORT_PATH,
@@ -26,6 +27,7 @@ MultiPartParser.max_part_size = MAX_UPLOAD_FILE_SIZE
 MultiPartParser.max_file_size = MAX_UPLOAD_FILE_SIZE
 
 app = FastAPI(title=APP_TITLE, version=APP_VERSION)
+app.mount(PUBLIC_ROUTE_PREFIX, StaticFiles(directory=PUBLIC_DIR, check_dir=False), name="public")
 app.include_router(router)
 
 

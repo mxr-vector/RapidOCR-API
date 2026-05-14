@@ -32,7 +32,7 @@ from rapidocr_api.schemas.ocr import (
     PdfTask,
     PdfTaskCreated,
 )
-from rapidocr_api.services.document import format_image_document
+from rapidocr_api.services.document import finalize_pdf_markdown_page_assets, format_image_document
 from rapidocr_api.services.ocr import processor
 from rapidocr_api.services.utils import (
     build_ocr_kwargs,
@@ -447,13 +447,15 @@ def process_pdf_markdown(
     pages = [
         PdfMarkdownPageResult(
             page_no=page_no,
-            markdown=page.get("formatted_markdown", ""),
+            markdown=page.get("markdown", ""),
             blocks=with_page_no(page.get("blocks", []), page_no),
             layout=page.get("layout"),
             resources=with_page_no(page.get("resources", []), page_no),
-            images=with_page_no(page.get("images", []), page_no),
         )
-        for page_no, page in enumerate(rendered.page_results, start=1)
+        for page_no, page in (
+            (page_no, finalize_pdf_markdown_page_assets(page, task_id, page_no))
+            for page_no, page in enumerate(rendered.page_results, start=1)
+        )
     ]
     logger.info(
         "PDF markdown request completed: page_count=%s processed_pages=%s elapsed_seconds=%.2f page_workers=%s render_stats=%s",
@@ -463,16 +465,8 @@ def process_pdf_markdown(
         PDF_PAGE_WORKERS,
         rendered.render_stats,
     )
-    blocks = [block for page in pages for block in page.blocks]
-    resources = [resource for page in pages for resource in page.resources]
-    images = [image for page in pages for image in page.images]
-    layouts = [{"page_no": page.page_no, "layout": page.layout} for page in pages if page.layout is not None]
     return PdfMarkdownResult(
         page_count=len(pages),
         markdown="\n\n".join(page.markdown for page in pages if page.markdown),
         pages=pages,
-        blocks=blocks,
-        layout={"pages": layouts} if layouts else None,
-        resources=resources,
-        images=images,
     )
