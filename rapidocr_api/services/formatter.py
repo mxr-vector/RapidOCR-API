@@ -40,7 +40,7 @@ class FormattedDocument:
     markdown: str
     layout: dict[str, Any] | None = None
     content: list[Any] | None = None
-    images: dict[str, bytes] | None = None
+    images: dict[str, Any] | None = None
 
 
 def _path_config(path: str | Path) -> dict[str, str]:

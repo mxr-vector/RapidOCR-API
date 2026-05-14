@@ -1,6 +1,7 @@
 import logging
 import threading
 import time
+from pathlib import Path
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from typing import Any, Callable, Optional
 from uuid import uuid4
@@ -100,7 +101,9 @@ def now_timestamp() -> float:
 def task_from_record(record: PdfStorageRecord, include_result: bool = False) -> PdfTask:
     """把存储记录装配为查询响应，成功任务按结果类型加载结果文件。"""
     result = None
-    if include_result and record.status == PdfTaskStatus.SUCCEEDED:
+    result_file_exists = Path(record.result_file_path).exists()
+    result_available = record.status == PdfTaskStatus.SUCCEEDED and result_file_exists
+    if include_result and result_available:
         raw_result = read_pdf_result(record.result_file_path)
         if record.result_type == PdfResultType.MARKDOWN:
             result = PdfMarkdownResult.model_validate(raw_result)
@@ -118,6 +121,8 @@ def task_from_record(record: PdfStorageRecord, include_result: bool = False) -> 
         current_page=record.current_page,
         file=record.file,
         result_file_path=record.result_file_path,
+        result_file_exists=result_file_exists,
+        result_available=result_available,
         result=result,
         error=record.error,
     )
@@ -435,12 +440,18 @@ def process_pdf_markdown(
     def process_page(image: Image.Image) -> dict[str, Any]:
         return format_image_document(image)
 
+    def with_page_no(items: list[dict[str, Any]], page_no: int) -> list[dict[str, Any]]:
+        return [{**item, "page_no": item.get("page_no") or page_no} for item in items]
+
     rendered = process_rendered_pages(pdf_path, task_id, "PDF markdown", process_page)
     pages = [
         PdfMarkdownPageResult(
             page_no=page_no,
-            markdown=page["formatted_markdown"],
-            blocks=[{**block, "page_no": page_no} for block in page.get("blocks", [])],
+            markdown=page.get("formatted_markdown", ""),
+            blocks=with_page_no(page.get("blocks", []), page_no),
+            layout=page.get("layout"),
+            resources=with_page_no(page.get("resources", []), page_no),
+            images=with_page_no(page.get("images", []), page_no),
         )
         for page_no, page in enumerate(rendered.page_results, start=1)
     ]
@@ -452,10 +463,16 @@ def process_pdf_markdown(
         PDF_PAGE_WORKERS,
         rendered.render_stats,
     )
-    blocks = [block for page in pages for block in (page.blocks or [])]
+    blocks = [block for page in pages for block in page.blocks]
+    resources = [resource for page in pages for resource in page.resources]
+    images = [image for page in pages for image in page.images]
+    layouts = [{"page_no": page.page_no, "layout": page.layout} for page in pages if page.layout is not None]
     return PdfMarkdownResult(
         page_count=len(pages),
         markdown="\n\n".join(page.markdown for page in pages if page.markdown),
         pages=pages,
         blocks=blocks,
+        layout={"pages": layouts} if layouts else None,
+        resources=resources,
+        images=images,
     )

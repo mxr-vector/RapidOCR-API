@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from rapidocr_api.core.constants import PdfResultType, PdfTaskStatus
 
@@ -26,21 +26,80 @@ class PdfResult(BaseModel):
     pages: list[PdfPageResult]
 
 
+class PdfMarkdownBlock(BaseModel):
+    """PDF Markdown 结构化块，保留稳定字段并兼容额外字段。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    type: str | None = None
+    page_no: int | None = None
+    content: Any | None = None
+    bbox: list[int] | None = None
+    text_level: int | None = None
+    img_path: str | None = None
+    resource_id: str | None = None
+    resource_type: str | None = None
+    data_type: str | None = None
+    mime_type: str | None = None
+
+
+class PdfDocumentResource(BaseModel):
+    """PDF Markdown 中引用的图片或文档资源。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    resource_id: str
+    page_no: int | None = None
+    resource_type: str = "image"
+    data_type: str | None = None
+    mime_type: str | None = None
+    data: str | None = None
+    path: str | None = None
+    source_path: str | None = None
+    size_bytes: int | None = None
+
+
 class PdfMarkdownPageResult(BaseModel):
-    """PDF 单页 Markdown 与精简结构化块结果。"""
+    """PDF 单页 Markdown 与结构化结果。"""
 
     page_no: int
-    markdown: str
-    blocks: list[dict[str, Any]] | None = None
+    markdown: str = ""
+    blocks: list[PdfMarkdownBlock] = Field(default_factory=list)
+    layout: dict[str, Any] | None = None
+    resources: list[PdfDocumentResource] = Field(default_factory=list)
+    images: list[PdfDocumentResource] = Field(default_factory=list)
+
+    @field_validator("markdown", mode="before")
+    @classmethod
+    def default_markdown(cls, value: Any) -> str:
+        return "" if value is None else value
+
+    @field_validator("blocks", "resources", "images", mode="before")
+    @classmethod
+    def default_lists(cls, value: Any) -> list[Any]:
+        return [] if value is None else value
 
 
 class PdfMarkdownResult(BaseModel):
     """PDF 整体 Markdown 结果。"""
 
     page_count: int
-    markdown: str
+    markdown: str = ""
     pages: list[PdfMarkdownPageResult]
-    blocks: list[dict[str, Any]] | None = None
+    blocks: list[PdfMarkdownBlock] = Field(default_factory=list)
+    layout: dict[str, Any] | None = None
+    resources: list[PdfDocumentResource] = Field(default_factory=list)
+    images: list[PdfDocumentResource] = Field(default_factory=list)
+
+    @field_validator("markdown", mode="before")
+    @classmethod
+    def default_markdown(cls, value: Any) -> str:
+        return "" if value is None else value
+
+    @field_validator("blocks", "resources", "images", mode="before")
+    @classmethod
+    def default_lists(cls, value: Any) -> list[Any]:
+        return [] if value is None else value
 
 
 class PdfRenderStat(BaseModel):
@@ -122,6 +181,8 @@ class PdfTask(BaseModel):
     current_page: int | None = None
     file: PdfStoredFile | None = None
     result_file_path: str | None = None
+    result_file_exists: bool = False
+    result_available: bool = False
     result: PdfResult | PdfMarkdownResult | None = None
     error: PdfTaskError | None = None
 
